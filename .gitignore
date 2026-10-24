@@ -1,0 +1,30 @@
+# --- Data: never commit (9M-row CSV exceeds GitHub limits and is not ours to republish)
+data/*
+!data/.gitkeep
+!data/README.md
+*.csv
+*.parquet
+*.pkl
+*.xlsx
+
+# --- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- Jupyter
+.ipynb_checkpoints/
+
+# --- Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
