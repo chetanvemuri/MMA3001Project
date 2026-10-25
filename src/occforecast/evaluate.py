@@ -8,7 +8,10 @@ shuffled, so the test period is always later than the training period.
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
+import pandas as pd
 
 
 def _valid(y_true, y_pred) -> tuple[np.ndarray, np.ndarray]:
@@ -101,3 +104,46 @@ def score(y_true, y_pred, threshold: float = 0.5) -> dict:
     t, _ = _valid(y_true, y_pred)
     return {"MAE": mae(y_true, y_pred), "RMSE": rmse(y_true, y_pred),
             "F1": occupied_f1(y_true, y_pred, threshold), "n": int(t.size)}
+
+
+def rolling_origin(
+    y: pd.Series,
+    origins: list[pd.Timestamp],
+    window: str | pd.Timedelta,
+    forecasters: dict[str, Callable[[pd.Series, pd.Timestamp], pd.Series]],
+    threshold: float = 0.5,
+) -> pd.DataFrame:
+    """Evaluate forecasters over several consecutive train/test splits.
+
+    For each origin, every forecaster is trained on data before the origin
+    (expanding window) and scored on the following ``window``. All methods are
+    scored on the same intervals: those with an observed value and a forecast
+    from every method. Repeating the test over many origins shows whether a
+    method wins consistently or only on one lucky test period.
+
+    Args:
+        y: Observed headcount series for one space (sorted, local time).
+        origins: Start of each test window.
+        window: Length of each test window, e.g. ``"56D"`` (8 weeks).
+        forecasters: Mapping of method name to a function ``f(y, origin)``
+            that returns forecasts indexed by timestamps from ``origin`` on.
+            It must only learn from data before ``origin``.
+        threshold: Occupancy threshold for F1.
+
+    Returns:
+        One row per (origin, method) with ``MAE``, ``RMSE``, ``F1`` and ``n``.
+        Origins with no observed data in their window are skipped.
+    """
+    rows = []
+    for origin in origins:
+        end = origin + pd.Timedelta(window)
+        actual = y[(y.index >= origin) & (y.index < end)].dropna()
+        if actual.empty or y[y.index < origin].dropna().empty:
+            continue
+        preds = pd.DataFrame({name: f(y, origin).reindex(actual.index)
+                              for name, f in forecasters.items()})
+        common = preds.notna().all(axis=1).to_numpy()
+        for name in forecasters:
+            rows.append({"origin": origin, "method": name,
+                         **score(actual[common], preds.loc[common, name], threshold)})
+    return pd.DataFrame(rows)

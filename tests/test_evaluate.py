@@ -1,9 +1,10 @@
 """Tests for occforecast.evaluate against hand-calculated answers."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
-from occforecast.evaluate import mae, occupied_f1, rmse, score
+from occforecast.evaluate import mae, occupied_f1, rmse, rolling_origin, score
 
 
 def test_mae_and_rmse_hand_calculated():
@@ -42,3 +43,33 @@ def test_f1_threshold():
 def test_length_mismatch_raises():
     with pytest.raises(ValueError):
         mae([1, 2], [1])
+
+
+# --- Rolling origin ----------------------------------------------------------
+
+
+def _series(days=20):
+    idx = pd.date_range("2024-05-01", periods=days * 96, freq="15min", tz="Australia/Melbourne")
+    return pd.Series(np.arange(len(idx), dtype=float), index=idx)
+
+
+def test_rolling_origin_scores_each_window():
+    y = _series()
+    origins = [y.index[0] + pd.Timedelta(days=d) for d in (5, 10)]
+    perfect = lambda s, o: s[s.index >= o]                       # knows the answer
+    off_by_one = lambda s, o: s[s.index >= o] + 1
+    out = rolling_origin(y, origins, "2D", {"perfect": perfect, "off": off_by_one})
+    assert len(out) == 4
+    assert (out.loc[out.method == "perfect", "MAE"] == 0).all()
+    assert (out.loc[out.method == "off", "MAE"] == 1).all()
+    assert (out["n"] == 2 * 96).all()                            # exactly the 2-day window
+
+
+def test_rolling_origin_common_intervals_and_skips():
+    y = _series()
+    origin = y.index[0] + pd.Timedelta(days=5)
+    gappy = lambda s, o: s[s.index >= o].iloc[10:]               # misses 10 intervals
+    full = lambda s, o: s[s.index >= o]
+    out = rolling_origin(y, [origin, y.index[0]], "1D", {"gappy": gappy, "full": full})
+    assert set(out["origin"]) == {origin}                        # first origin has no history
+    assert (out["n"] == 96 - 10).all()                           # both scored on same intervals
