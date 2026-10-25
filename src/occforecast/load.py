@@ -18,6 +18,9 @@ Rows are not stored in time order, so :func:`load_occupancy` always sorts them.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
 
 #: Columns that must be present in the raw CSV.
@@ -67,6 +70,66 @@ def load_occupancy(path: str, chunksize: int = 1_000_000) -> pd.DataFrame:
     return df
 
 
+def load_cached(path: str, cache: str | None = None, **kwargs) -> pd.DataFrame:
+    """Load the occupancy CSV, reusing a saved copy of the cleaned data if possible.
+
+    The first call runs :func:`load_occupancy` and saves the result as a
+    pickle (a fast binary format). Later calls read the pickle instead of
+    re-parsing 9 million CSV rows, as long as the pickle is newer than the CSV.
+    Only use pickles you created yourself: loading a pickle can run code.
+
+    Args:
+        path: Path to the raw occupancy CSV.
+        cache: Where to store the cleaned copy. Defaults to the CSV path with
+            the suffix ``.clean.pkl`` (ignored by git).
+        **kwargs: Passed to :func:`load_occupancy`.
+
+    Returns:
+        Same as :func:`load_occupancy`. ``df.attrs["from_cache"]`` is True if
+        the saved copy was used.
+    """
+    src = Path(path)
+    cache_path = Path(cache) if cache else src.with_suffix(".clean.pkl")
+    if cache_path.exists() and cache_path.stat().st_mtime >= src.stat().st_mtime:
+        df = pd.read_pickle(cache_path)
+        df.attrs["from_cache"] = True
+        return df
+    df = load_occupancy(path, **kwargs)
+    df.to_pickle(cache_path)
+    df.attrs["from_cache"] = False
+    return df
+
+
+def parse_timestamps(text: pd.Series) -> pd.Series:
+    """Alternative timestamp parser, kept for the benchmark in notebook 05.
+
+    Parses the fixed-format date-time part and the UTC offset (``+10``/``+11``)
+    separately and combines them. It gives the same instants as
+    ``pd.to_datetime(text, utc=True, errors="coerce")`` (checked in
+    ``tests/test_load.py``).
+
+    It was written as a proposed optimisation, but on the reference machine
+    (pandas on Windows, real data) it was **about 3x slower** than
+    ``pd.to_datetime``, so :func:`load_occupancy` does not use it. The
+    measurement is reported in ``examples/05_performance.ipynb``.
+
+    Args:
+        text: Timestamps as ``YYYY-MM-DD HH:MM:SS`` followed by an offset
+            ``+HH``, ``+HHMM`` or ``+HH:MM``.
+
+    Returns:
+        Timezone-aware UTC timestamps; NaT where the text is not valid.
+    """
+    s = text.astype("string")
+    local = pd.to_datetime(s.str[:19], format="%Y-%m-%d %H:%M:%S", errors="coerce")
+    off = (pd.to_numeric(s.str[19:].str.replace(":", "", regex=False), errors="coerce")
+           .to_numpy(dtype=float, na_value=np.nan))
+    # "+11" -> 11 h; "+1030" -> 10.5 h
+    hours = np.where(np.abs(off) >= 100,
+                     np.trunc(off / 100) + np.sign(off) * (np.abs(off) % 100) / 60, off)
+    return (local - pd.to_timedelta(hours, unit="h")).dt.tz_localize("UTC")
+
+
 def _clean_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
     """Rename, type-convert and filter one chunk of raw rows.
 
@@ -79,6 +142,7 @@ def _clean_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
     """
     out = pd.DataFrame({
         # utc=True handles the mixed +10/+11 offsets (daylight saving).
+        # (A hand-written parser was tried and was slower; see parse_timestamps.)
         "time": pd.to_datetime(chunk["collecteddate"], utc=True, errors="coerce"),
         "space": chunk["floorspaceid"],
         "status": chunk["occupancystatus"],
