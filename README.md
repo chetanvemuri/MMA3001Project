@@ -142,7 +142,6 @@ Items marked TODO can only be answered by me._
 
 | Tool | Used for | Extent | How output was checked |
 |---|---|---|---|
-| Google Gemini 2.5 | _TODO_ | _TODO_ | _TODO_ |
 | Claude (Anthropic) | Interpreting the brief; auditing the provided datasets; drafting the problem statement; writing the package code (`load`, `resample`, `baselines`, `model`, `evaluate`, `ventilation`), tests and notebooks; drafting notebook findings from my results; Git/VS Code help | _TODO: e.g. "most code first drafted by Claude; I ran, checked and corrected it"_ | 51 unit tests against hand calculations (100% line coverage); independent loop implementation to verify the resampler; equality checks after every optimisation; ran every notebook on the real data and checked written findings against the outputs; _TODO: my own checks_ |
 
 **Decisions that stayed mine:** _TODO - confirm/edit, e.g. choice of Dataset 2;
