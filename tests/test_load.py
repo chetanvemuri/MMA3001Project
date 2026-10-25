@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from occforecast.load import audit, load_occupancy
+from occforecast.load import audit, load_cached, load_occupancy, parse_timestamps
 
 CSV = """id,deviceid,floorspaceid,occupancystatus,headcount,collecteddate
 3,d,A,NotOccupied,0,2024-03-01 09:10:00+11
@@ -51,3 +51,24 @@ def test_audit_flags_status_mismatch(csv_path):
     assert report.loc["A", "status_mismatch"] == 1
     assert report.loc["B", "status_mismatch"] == 0
     assert report.loc["A", "max_headcount"] == 2
+
+
+def test_load_cached_reuses_saved_copy(csv_path, tmp_path):
+    cache = tmp_path / "occ.clean.pkl"
+    first = load_cached(csv_path, cache=cache)
+    second = load_cached(csv_path, cache=cache)
+    assert first.attrs["from_cache"] is False and second.attrs["from_cache"] is True
+    pd.testing.assert_frame_equal(first, second)
+    assert second.attrs["n_raw"] == 7          # audit counts survive the cache
+
+
+def test_parse_timestamps_matches_pandas():
+    text = pd.Series(["2023-11-24 00:36:52+11", "2024-06-01 09:00:00+10",
+                      "2024-03-01 10:00:00+05:30", "2024-03-01 10:00:00+0000",
+                      "not-a-date", None])
+    fast = parse_timestamps(text)
+    slow = pd.to_datetime(text, utc=True, errors="coerce", format="mixed")
+    assert (fast.isna() == slow.isna()).all()
+    ok = slow.notna()
+    assert (fast[ok] == slow[ok]).all()
+    assert fast.iloc[0] == pd.Timestamp("2023-11-23 13:36:52", tz="UTC")

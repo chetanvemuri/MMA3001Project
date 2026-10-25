@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from occforecast.resample import to_regular
+from occforecast.resample import to_regular, to_regular_naive
 
 
 def events(*pairs):
@@ -73,3 +73,20 @@ def test_rejects_naive_and_empty():
         to_regular(ev.assign(time=ev["time"].dt.tz_localize(None)))
     with pytest.raises(ValueError):
         to_regular(ev.iloc[0:0])
+
+
+# --- Independent reference implementation ------------------------------------
+
+
+@pytest.mark.parametrize("max_hold", [None, "20min", "2h"])
+def test_vectorised_matches_naive_reference(max_hold):
+    # Random events (irregular gaps from seconds to hours, duplicates included):
+    # two independently written implementations must agree.
+    rng = np.random.default_rng(42)
+    gaps = rng.choice([2, 4, 30, 600, 3600, 4 * 3600], size=400, p=[.3, .2, .2, .15, .1, .05])
+    times = pd.Timestamp("2024-03-01", tz="UTC") + pd.to_timedelta(np.cumsum(gaps), unit="s")
+    ev = pd.DataFrame({"time": times, "headcount": rng.integers(0, 6, len(times))})
+    ev = pd.concat([ev, ev.iloc[[5, 50]].assign(headcount=9)])       # duplicate timestamps
+    fast = to_regular(ev, max_hold=max_hold, local_tz=None)
+    slow = to_regular_naive(ev, max_hold=max_hold, local_tz=None)
+    pd.testing.assert_frame_equal(fast, slow, check_freq=False, rtol=1e-9)

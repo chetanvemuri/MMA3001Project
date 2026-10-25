@@ -111,6 +111,90 @@ def to_regular(
     return out
 
 
+def to_regular_naive(
+    events: pd.DataFrame,
+    freq: str = "15min",
+    max_hold: str | pd.Timedelta | None = None,
+    local_tz: str | None = LOCAL_TZ,
+) -> pd.DataFrame:
+    """Reference (slow) implementation of :func:`to_regular` using plain loops.
+
+    Walks through the events one by one and adds each held value's duration
+    to the intervals it overlaps. It is written for clarity, not speed, and is
+    used to (1) verify the vectorised :func:`to_regular` - the two are written
+    independently, so agreement is evidence both are correct - and (2) measure
+    the speed-up from vectorisation.
+
+    Args:
+        events: As for :func:`to_regular`.
+        freq: As for :func:`to_regular`.
+        max_hold: As for :func:`to_regular`.
+        local_tz: As for :func:`to_regular`.
+
+    Returns:
+        Same columns and index as :func:`to_regular`.
+
+    Raises:
+        ValueError: If ``events`` is empty or ``time`` is not tz-aware.
+    """
+    if events.empty:
+        raise ValueError("events is empty")
+    if events["time"].dt.tz is None:
+        raise ValueError("events['time'] must be timezone-aware")
+
+    step = pd.Timedelta(freq)
+    s = (events[["time", "headcount"]]
+         .assign(time=events["time"].dt.tz_convert("UTC"))
+         .sort_values("time")
+         .drop_duplicates("time", keep="last")
+         .set_index("time")["headcount"]
+         .astype(float))
+    start = s.index[0].floor(freq)
+    end = s.index[-1].floor(freq) + step
+
+    # Work in seconds relative to the first interval start.
+    times = list((s.index - start).total_seconds())
+    values = list(s.to_numpy())
+    step_s = step.total_seconds()
+    end_s = (end - start).total_seconds()
+    hold_s = pd.Timedelta(max_hold).total_seconds() if max_hold is not None else float("inf")
+    n_bins = int(round(end_s / step_s))
+
+    weighted = [0.0] * n_bins
+    known = [0.0] * n_bins
+    occupied = [0.0] * n_bins
+    vmax = [float("nan")] * n_bins
+
+    for i, (a, v) in enumerate(zip(times, values)):
+        next_event = times[i + 1] if i + 1 < len(times) else end_s
+        b = min(next_event, a + hold_s)          # value is known on [a, b)
+        x = a
+        while x < b:
+            k = int(x // step_s)                 # interval containing x
+            y = min(b, (k + 1) * step_s)         # end of this piece
+            d = y - x
+            weighted[k] += v * d
+            known[k] += d
+            if v > 0:
+                occupied[k] += d
+            vmax[k] = v if np.isnan(vmax[k]) else max(vmax[k], v)
+            x = y
+
+    known_a = np.array(known)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = pd.DataFrame({
+            "headcount_mean": np.array(weighted) / known_a,
+            "headcount_max": np.array(vmax),
+            "occupied_frac": np.array(occupied) / known_a,
+            "coverage": known_a / step_s,
+        }, index=pd.date_range(start, periods=n_bins, freq=freq))
+    out.loc[out["coverage"] == 0, ["headcount_mean", "headcount_max", "occupied_frac"]] = np.nan
+    out.index.name = "interval_start"
+    if local_tz is not None:
+        out.index = out.index.tz_convert(local_tz)
+    return out
+
+
 def resample_all(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
     """Apply :func:`to_regular` to every space.
 
