@@ -3,6 +3,7 @@ numpy>=1.26
 pandas>=2.1
 scikit-learn>=1.4
 matplotlib>=3.8
+holidays>=0.50
 jupyter>=1.0
 
 # Testing and documentation
