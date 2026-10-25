@@ -18,12 +18,14 @@ CSV = """id,deviceid,floorspaceid,occupancystatus,headcount,collecteddate
 
 @pytest.fixture
 def csv_path(tmp_path):
+    """Write the small hand-made CSV to a temporary file."""
     p = tmp_path / "occ.csv"
     p.write_text(CSV)
     return p
 
 
 def test_invalid_rows_dropped(csv_path):
+    """Rows with a bad date, negative count or unknown status are dropped."""
     df = load_occupancy(csv_path)
     assert df.attrs["n_raw"] == 7
     assert df.attrs["n_dropped"] == 3          # bad date, negative count, bad status
@@ -31,6 +33,7 @@ def test_invalid_rows_dropped(csv_path):
 
 
 def test_sorted_and_utc(csv_path):
+    """Events are sorted by time and converted to UTC."""
     df = load_occupancy(csv_path)
     a = df[df["space"] == "A"]
     assert a["time"].is_monotonic_increasing
@@ -39,6 +42,7 @@ def test_sorted_and_utc(csv_path):
 
 
 def test_missing_column_raises(tmp_path):
+    """A CSV missing a required column raises ValueError."""
     p = tmp_path / "bad.csv"
     p.write_text("floorspaceid,headcount\nA,1\n")
     with pytest.raises(ValueError, match="collecteddate"):
@@ -46,6 +50,7 @@ def test_missing_column_raises(tmp_path):
 
 
 def test_audit_flags_status_mismatch(csv_path):
+    """audit counts rows where status and headcount disagree."""
     report = audit(load_occupancy(csv_path))
     # Row 2: CurrentlyOccupied with headcount 0 is inconsistent.
     assert report.loc["A", "status_mismatch"] == 1
@@ -54,6 +59,7 @@ def test_audit_flags_status_mismatch(csv_path):
 
 
 def test_load_cached_reuses_saved_copy(csv_path, tmp_path):
+    """The second load comes from the cache and is identical to the first."""
     cache = tmp_path / "occ.clean.pkl"
     first = load_cached(csv_path, cache=cache)
     second = load_cached(csv_path, cache=cache)
@@ -63,6 +69,7 @@ def test_load_cached_reuses_saved_copy(csv_path, tmp_path):
 
 
 def test_parse_timestamps_matches_pandas():
+    """The alternative parser gives the same instants as pd.to_datetime."""
     text = pd.Series(["2023-11-24 00:36:52+11", "2024-06-01 09:00:00+10",
                       "2024-03-01 10:00:00+05:30", "2024-03-01 10:00:00+0000",
                       "not-a-date", None])

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from occforecast.resample import to_regular, to_regular_naive
+from occforecast.resample import resample_all, to_regular, to_regular_naive
 
 
 def events(*pairs):
@@ -16,6 +16,7 @@ def events(*pairs):
 
 
 def test_time_weighted_mean():
+    """Interval means are time-weighted (hand-calculated)."""
     # 2 people for 5 min then 0 for 10 min -> mean = 2*5/15 = 2/3.
     out = to_regular(events(("00:00", 2), ("00:05", 0), ("00:30", 4)), local_tz=None)
     assert out["headcount_mean"].tolist() == pytest.approx([2 / 3, 0.0, 4.0])
@@ -25,6 +26,7 @@ def test_time_weighted_mean():
 
 
 def test_mean_not_biased_by_event_rate():
+    """Many short events do not outweigh one long steady period."""
     # Many events at 1 person, one event at 10 people: the long 10-person
     # period must dominate even though it has only one event.
     ev = events(*[(f"00:0{i}", 1) for i in range(5)], ("00:05", 10))
@@ -33,6 +35,7 @@ def test_mean_not_biased_by_event_rate():
 
 
 def test_unsorted_input_gives_same_result():
+    """Input order does not change the result."""
     ev = events(("00:00", 2), ("00:05", 0), ("00:30", 4))
     a = to_regular(ev, local_tz=None)
     b = to_regular(ev.iloc[::-1], local_tz=None)
@@ -40,6 +43,7 @@ def test_unsorted_input_gives_same_result():
 
 
 def test_max_hold_marks_outage_unknown():
+    """Silences longer than max_hold become unknown (NaN)."""
     # Reading of 3 at 00:00, then silence until 02:00. With a 30-min hold,
     # 00:00-00:30 is known, 00:30-02:00 is unknown.
     out = to_regular(events(("00:00", 3), ("02:00", 0)), max_hold="30min", local_tz=None)
@@ -50,6 +54,7 @@ def test_max_hold_marks_outage_unknown():
 
 
 def test_partial_coverage():
+    """Coverage and mean are correct when only part of an interval is known."""
     # Hold of 5 min inside a 15-min bin -> coverage 1/3, mean over known part.
     out = to_regular(events(("00:00", 6), ("00:20", 0)), max_hold="5min", local_tz=None)
     assert out["coverage"].iloc[0] == pytest.approx(1 / 3)
@@ -57,6 +62,7 @@ def test_partial_coverage():
 
 
 def test_local_time_index_across_dst_end():
+    """Output is in Melbourne time and stays ordered across the DST change."""
     # Melbourne DST ended 03:00 local on 7 Apr 2024 (clocks went back to 02:00).
     ev = pd.DataFrame({
         "time": pd.to_datetime(["2024-04-06 15:00", "2024-04-06 17:00"]).tz_localize("UTC"),
@@ -68,6 +74,7 @@ def test_local_time_index_across_dst_end():
 
 
 def test_rejects_naive_and_empty():
+    """Timezone-naive or empty input raises ValueError."""
     ev = events(("00:00", 1))
     with pytest.raises(ValueError):
         to_regular(ev.assign(time=ev["time"].dt.tz_localize(None)))
@@ -80,6 +87,7 @@ def test_rejects_naive_and_empty():
 
 @pytest.mark.parametrize("max_hold", [None, "20min", "2h"])
 def test_vectorised_matches_naive_reference(max_hold):
+    """The vectorised resampler matches the independent loop version."""
     # Random events (irregular gaps from seconds to hours, duplicates included):
     # two independently written implementations must agree.
     rng = np.random.default_rng(42)
@@ -90,3 +98,23 @@ def test_vectorised_matches_naive_reference(max_hold):
     fast = to_regular(ev, max_hold=max_hold, local_tz=None)
     slow = to_regular_naive(ev, max_hold=max_hold, local_tz=None)
     pd.testing.assert_frame_equal(fast, slow, check_freq=False, rtol=1e-9)
+
+
+def test_naive_reference_local_time_and_bad_input():
+    """The loop version also returns Melbourne time and rejects bad input."""
+    ev = events(("00:00", 2), ("00:30", 0))
+    assert str(to_regular_naive(ev).index.tz) == "Australia/Melbourne"
+    with pytest.raises(ValueError):
+        to_regular_naive(ev.iloc[0:0])
+    with pytest.raises(ValueError):
+        to_regular_naive(ev.assign(time=ev["time"].dt.tz_localize(None)))
+
+
+def test_resample_all_labels_each_space():
+    """resample_all resamples every space and tags rows with their space ID."""
+    ev = pd.concat([events(("00:00", 2), ("00:30", 0)).assign(space="A"),
+                    events(("00:00", 5)).assign(space="B")])
+    out = resample_all(ev, local_tz=None)
+    assert set(out["space"]) == {"A", "B"}
+    assert out.loc[out["space"] == "B", "headcount_mean"].tolist() == [5.0]
+    assert out.loc[out["space"] == "A", "headcount_mean"].tolist() == [2.0, 2.0, 0.0]

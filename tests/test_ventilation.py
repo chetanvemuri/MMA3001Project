@@ -11,12 +11,14 @@ TZ = "Australia/Melbourne"
 
 
 def test_outdoor_air_flow():
+    """Required flow is headcount x rate; NaN stays NaN."""
     hc = pd.Series([0.0, 2.5, np.nan])
     out = outdoor_air_flow(hc, 10.0)
     assert out.iloc[0] == 0 and out.iloc[1] == 25.0 and np.isnan(out.iloc[2])
 
 
 def test_outdoor_air_flow_rejects_bad_input():
+    """A non-positive rate or negative headcount raises ValueError."""
     with pytest.raises(ValueError):
         outdoor_air_flow(pd.Series([1.0]), 0)
     with pytest.raises(ValueError):
@@ -24,6 +26,7 @@ def test_outdoor_air_flow_rejects_bad_input():
 
 
 def test_fixed_schedule_hours_and_weekend():
+    """The fixed schedule runs only 07:00-19:00 on weekdays."""
     idx = pd.DatetimeIndex(["2024-05-13 06:45", "2024-05-13 07:00", "2024-05-13 18:45",
                             "2024-05-13 19:00", "2024-05-18 10:00"], tz=TZ)   # Mon x4, Sat
     out = fixed_schedule(idx, design_occupancy=20, rate_l_s_per_person=10)
@@ -31,6 +34,7 @@ def test_fixed_schedule_hours_and_weekend():
 
 
 def test_compare_strategies_hand_calculated():
+    """Air volume, under-ventilation and shortfall match hand calculations."""
     idx = pd.date_range("2024-05-13 09:00", periods=4, freq="15min", tz=TZ)
     required = pd.Series([0.0, 20.0, 40.0, np.nan], index=idx)        # 0, 2, 4 people, unknown
     supplied = {"exact": required.fillna(0),
@@ -49,5 +53,6 @@ def test_compare_strategies_hand_calculated():
 
 
 def test_conditioning_energy():
+    """Conditioning energy matches E = rho V cp dT (hand-calculated)."""
     # 1000 m3 x 1.2 kg/m3 x 1.005 kJ/kgK x 10 K = 12,060 kJ = 3.35 kWh
     assert conditioning_energy_kwh(1000, 10) == pytest.approx(3.35)
