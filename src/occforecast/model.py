@@ -45,7 +45,15 @@ FEATURES = [
 
 
 def _lag(y: pd.Series, delta: pd.Timedelta) -> np.ndarray:
-    """Value of ``y`` exactly ``delta`` before each timestamp (NaN if absent)."""
+    """Value of ``y`` exactly ``delta`` before each timestamp.
+
+    Args:
+        y: Series indexed by timestamp.
+        delta: How far back to look.
+
+    Returns:
+        Array aligned with ``y.index``; NaN where no value exists ``delta`` earlier.
+    """
     return y.reindex(y.index - delta).to_numpy()
 
 

@@ -6,9 +6,9 @@ Modules:
     load: Read, validate and audit the raw occupancy event CSV.
     resample: Convert irregular occupancy events into a regular time series.
     baselines: Reference forecasting methods (weekly profile, persistence).
-    model: Machine-learning forecasting model.
-    evaluate: Error metrics and chronological validation.
-    ventilation: Convert headcount forecasts into outdoor-air requirements.
+    model: Day-ahead features and the linear, decision tree and MLP forecasters.
+    evaluate: Error metrics and rolling-origin (chronological) validation.
+    ventilation: Outdoor-air requirements (AS 1668.2) and ventilation strategy comparison.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

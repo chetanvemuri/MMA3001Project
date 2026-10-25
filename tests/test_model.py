@@ -22,6 +22,7 @@ def weekly_series(start="2024-05-06", weeks=8, noise=0.0, seed=0):
 # --- Features ----------------------------------------------------------------
 
 def test_feature_columns_and_index():
+    """Features have the documented columns and the series' index."""
     y = weekly_series(weeks=2)
     X = make_features(y)
     assert list(X.columns) == FEATURES
@@ -29,6 +30,7 @@ def test_feature_columns_and_index():
 
 
 def test_no_leakage_from_last_24_hours():
+    """Features at time t do not change when the last 24 h of data change."""
     # Changing values in the 24 h before time t must not change t's features.
     y = weekly_series(weeks=6)
     t = y.index[-1]
@@ -38,6 +40,7 @@ def test_no_leakage_from_last_24_hours():
 
 
 def test_lag_values():
+    """Lag and profile features equal hand-picked earlier values."""
     y = pd.Series(np.arange(96 * 30, dtype=float),
                   index=pd.date_range("2024-05-01", periods=96 * 30, freq="15min", tz=TZ))
     X = make_features(y)
@@ -50,6 +53,7 @@ def test_lag_values():
 
 
 def test_calendar_features():
+    """Hour, weekday and weekend features are correct for a known Saturday."""
     idx = pd.DatetimeIndex(["2024-05-11 10:15"], tz=TZ)   # Saturday
     X = make_features(pd.Series([1.0], index=idx))
     assert X["hour"].iloc[0] == 10.25
@@ -57,6 +61,7 @@ def test_calendar_features():
 
 
 def test_holiday_flags():
+    """Public holidays and the shutdown window are flagged; ordinary days are not."""
     idx = pd.DatetimeIndex(["2024-04-25 12:00",    # Anzac Day
                             "2024-12-27 12:00",    # shutdown window
                             "2025-01-07 12:00",    # last shutdown day
@@ -67,6 +72,7 @@ def test_holiday_flags():
 
 
 def test_unsorted_raises():
+    """Unsorted input raises ValueError."""
     y = weekly_series(weeks=1)
     with pytest.raises(ValueError):
         make_features(y.iloc[::-1])
@@ -76,6 +82,7 @@ def test_unsorted_raises():
 
 @pytest.mark.parametrize("name", ["linear", "tree", "mlp"])
 def test_models_forecast_whole_test_period_non_negative(name):
+    """Every model forecasts the whole test period with non-negative values."""
     y = weekly_series(weeks=8, noise=0.3)
     split = y.index[0] + pd.Timedelta(weeks=6)
     pred = fit_predict(y, split, make_model(name))
@@ -84,6 +91,7 @@ def test_models_forecast_whole_test_period_non_negative(name):
 
 
 def test_tree_learns_exact_weekly_pattern():
+    """The tree forecasts a noise-free weekly pattern almost perfectly."""
     # A noise-free repeating pattern should be forecast almost perfectly.
     y = weekly_series(weeks=8)
     split = y.index[0] + pd.Timedelta(weeks=6)
@@ -92,6 +100,7 @@ def test_tree_learns_exact_weekly_pattern():
 
 
 def test_missing_training_targets_are_skipped():
+    """Unknown training targets are skipped without breaking the fit."""
     y = weekly_series(weeks=8)
     y.iloc[:96 * 7] = np.nan                       # first week unknown
     split = y.index[0] + pd.Timedelta(weeks=6)
@@ -100,6 +109,7 @@ def test_missing_training_targets_are_skipped():
 
 
 def test_feature_importance_sums_to_one():
+    """Tree feature importances cover all features and sum to 1."""
     y = weekly_series(weeks=8, noise=0.3)
     model = make_model("tree")
     fit_predict(y, y.index[0] + pd.Timedelta(weeks=6), model)
@@ -109,5 +119,6 @@ def test_feature_importance_sums_to_one():
 
 
 def test_unknown_model_raises():
+    """An unknown model name raises ValueError."""
     with pytest.raises(ValueError):
         make_model("forest")

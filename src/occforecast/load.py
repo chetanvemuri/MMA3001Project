@@ -173,6 +173,14 @@ def audit(df: pd.DataFrame) -> pd.DataFrame:
         with headcount > 0).
     """
     def _per_space(g: pd.DataFrame) -> pd.Series:
+        """Quality summary for one space's events.
+
+        Args:
+            g: Events of a single space.
+
+        Returns:
+            The summary values described above for this space.
+        """
         occupied = g["status"].eq("CurrentlyOccupied")
         inconsistent = (occupied & g["headcount"].eq(0)) | (~occupied & g["headcount"].gt(0))
         return pd.Series({
